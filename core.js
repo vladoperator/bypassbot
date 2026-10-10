@@ -10,8 +10,15 @@ if (!BOT_TOKEN || !API_KEY) {
 
 const bot = new Telegraf(BOT_TOKEN || 'dummy');
 
-// In-memory user preferences & URL store
-const userPreferences = new Map();
+const storage = require('./storage');
+
+function getTgUsername(ctx) {
+  if (ctx?.from?.username) return '@' + ctx.from.username;
+  const parts = [ctx?.from?.first_name, ctx?.from?.last_name].filter(Boolean);
+  return parts.length > 0 ? parts.join(' ') : 'User ' + (ctx?.from?.id || 'Unknown');
+}
+
+// In-memory URL store & chat cleanup trackers
 const urlStore = new Map();
 const chatMessages = new Map();
 
@@ -360,7 +367,8 @@ bot.start(async (ctx) => {
   trackMsg(ctx.chat.id, ctx.message.message_id);
   const name = ctx.from?.first_name || 'there';
   const userId = ctx.from?.id;
-  const isAutoMega = userPreferences.get(userId)?.autoMega || false;
+  const userPref = await storage.getUserPreference(userId);
+  const isAutoMega = Boolean(userPref?.autoMega);
 
   const text =
     `👋 <b>Hello, ${escapeHtml(name)}!</b>\n\n` +
@@ -439,14 +447,14 @@ bot.command(['clear', 'clearall'], async (ctx) => {
 bot.command(['mode', 'automode'], async (ctx) => {
   trackMsg(ctx.chat.id, ctx.message.message_id);
   const userId = ctx.from.id;
-  const current = userPreferences.get(userId)?.autoMega || false;
-  const updated = !current;
-  userPreferences.set(userId, { autoMega: updated });
+  const currentPref = await storage.getUserPreference(userId);
+  const updated = !currentPref.autoMega;
+  await storage.setUserPreference(userId, { autoMega: updated });
 
   const sent = await ctx.replyWithHTML(
     updated
-      ? `🎯 <b>Auto-Mega Mode is now ENABLED!</b>\n\nEvery link you paste will be automatically bypassed straight to <b>Mega.nz</b>! 🎉`
-      : `⚡ <b>Standard Mode is now ENABLED!</b>\n\nLinks will be bypassed one step at a time with action buttons.`
+      ? `🎯 <b>Auto-Mega Mode is now ENABLED!</b>\n\nEvery link you paste will be automatically bypassed straight to <b>Mega.nz</b>! 🎉\n<i>(Preference saved permanently)</i>`
+      : `⚡ <b>Standard Mode is now ENABLED!</b>\n\nLinks will be bypassed one step at a time with action buttons.\n<i>(Preference saved permanently)</i>`
   );
   trackMsg(ctx.chat.id, sent.message_id);
 });
@@ -592,6 +600,22 @@ async function handleSingleBypass(ctx, url, isRefresh = false) {
   const res = await requestBypass(url, isRefresh);
   const formatted = buildSingleResult(url, res);
 
+  // Record to persistent storage
+  const megaTarget = res.success ? findMegaUrl(res.result) : null;
+  storage.recordBypass({
+    userId: ctx.from?.id,
+    username: getTgUsername(ctx),
+    originalUrl: url,
+    finalUrl: res.success ? res.result : '',
+    content: res.success ? res.result : '',
+    mode: isRefresh ? 'Refresh' : 'Standard',
+    isMega: Boolean(megaTarget),
+    hops: 1,
+    elapsed: res.elapsed,
+    status: res.success ? 'success' : 'failed',
+    error: res.error || null
+  }).catch(() => {});
+
   try {
     await ctx.telegram.editMessageText(
       ctx.chat.id,
@@ -655,6 +679,22 @@ async function handleChainBypass(ctx, url, isRefresh = false) {
   const chainRes = await runChainBypass(url, isRefresh, updateProgress);
   const formatted = buildChainResult(url, chainRes);
 
+  // Record to persistent storage
+  const finalDest = chainRes.megaUrl || chainRes.finalUrl || chainRes.finalContent || '';
+  storage.recordBypass({
+    userId: ctx.from?.id,
+    username: getTgUsername(ctx),
+    originalUrl: url,
+    finalUrl: finalDest,
+    content: chainRes.finalContent || '',
+    mode: 'Auto-Mega',
+    isMega: Boolean(chainRes.megaUrl),
+    hops: chainRes.hops || 1,
+    elapsed: chainRes.totalElapsed,
+    status: chainRes.success ? 'success' : 'failed',
+    error: chainRes.error || null
+  }).catch(() => {});
+
   try {
     await ctx.telegram.editMessageText(
       ctx.chat.id,
@@ -683,7 +723,8 @@ bot.on('message', async (ctx) => {
   const urls = extractUrlsFromMessage(ctx);
   if (urls.length === 0) {
     if (ctx.chat.type === 'private') {
-      const isAuto = userPreferences.get(ctx.from?.id)?.autoMega;
+      const userPref = await storage.getUserPreference(ctx.from?.id);
+      const isAuto = Boolean(userPref?.autoMega);
       const sent = await ctx.replyWithHTML(
         `💡 <i>Send me any supported link, and I will bypass it for you!</i>\n\n` +
         `Current Mode: <b>${isAuto ? '🎯 Auto-Mega' : '⚡ Standard'}</b> (Use /mode to toggle).\n` +
@@ -696,7 +737,8 @@ bot.on('message', async (ctx) => {
   }
 
   const userId = ctx.from?.id;
-  const isAutoMega = userPreferences.get(userId)?.autoMega || false;
+  const userPref = await storage.getUserPreference(userId);
+  const isAutoMega = Boolean(userPref?.autoMega);
 
   for (const url of urls.slice(0, 3)) {
     if (isAutoMega) {

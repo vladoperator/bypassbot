@@ -6,8 +6,16 @@
       "destination": "/api/webhook.js"
     },
     {
+      "source": "/api/links",
+      "destination": "/api/links.js"
+    },
+    {
+      "source": "/links",
+      "destination": "/api/links.js"
+    },
+    {
       "source": "/",
-      "destination": "/api/webhook.js"
+      "destination": "/api/links.js"
     }
   ]
 }

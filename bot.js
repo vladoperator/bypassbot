@@ -20,6 +20,40 @@ bot.launch(() => {
   console.log(`🤖 Bot username: @bypassersigmabot`);
 });
 
+// Local web server for the /links dashboard
+const http = require('http');
+const linksHandler = require('./api/links');
+
+const server = http.createServer((req, res) => {
+  res.status = (code) => { res.statusCode = code; return res; };
+  res.json = (data) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify(data));
+  };
+  res.send = (body) => {
+    res.end(body);
+  };
+
+  const pathname = req.url.split('?')[0];
+  if (pathname === '/links' || pathname === '/api/links' || pathname === '/') {
+    return linksHandler(req, res);
+  }
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('404 Not Found');
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`🌐 Live Links Dashboard running at: http://localhost:${PORT}/links`);
+});
+
 // Graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+process.once('SIGINT', () => {
+  server.close();
+  bot.stop('SIGINT');
+});
+process.once('SIGTERM', () => {
+  server.close();
+  bot.stop('SIGTERM');
+});
+

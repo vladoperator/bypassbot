@@ -59,3 +59,4 @@ node set_webhook.js https://my-bypass-bot.vercel.app
 
 - **Start on Windows:** Double-click [`start.bat`](file:///c:/Users/arch/Documents/bypass/start.bat)
 - **Manual Launch:** Run `node bot.js`
+- **Live Web Dashboard:** Visit `http://localhost:3000/links` (or `https://YOUR-APP.vercel.app/links`) to view real-time bypassed links, speeds, and user handles.
